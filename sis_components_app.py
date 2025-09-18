@@ -8,9 +8,13 @@ import streamlit as st
 REQUIRED_COLS = ["Product Name", "base_cost_usd", "component", "kg_co2e", "cost_usd"]
 REQUIRED_COMPONENTS = ["display", "circuit_boards", "casing"]
 
+# Raw URL of the dataset in the GitHub repository
+GITHUB_DATA_URL = "https://raw.githubusercontent.com/bpallen2/MSE490/main/datasets/mobile_phone_component_cost_test_dataset.csv"
+
 # ---------- core: load/validate/aggregate ----------
 def load_csv_validated(path: str) -> pd.DataFrame:
-    df = pd.read_csv(path)
+    # Read directly from the GitHub raw URL
+    df = pd.read_csv(GITHUB_DATA_URL)
     missing = [c for c in REQUIRED_COLS if c not in df.columns]
     assert not missing, f"CSV missing required columns: {missing}"
     df["component"] = df["component"].astype(str).str.strip()
@@ -82,22 +86,21 @@ st.title("📱 Phone Component Mixer — EPEAT CSV + 🎯 Goal Mode (Practice)")
 
 with st.sidebar:
     st.header("Data")
-    csv_path = st.text_input(
-        "CSV path",
-        value="/content/mobile_phone_component_cost_test_dataset.csv", # Corrected path
-        help="Path to your uploaded CSV."
-    )
+    # Removed the text input for CSV path
     st.caption("Required cols: " + ", ".join(REQUIRED_COLS))
     st.caption("Required components: " + ", ".join(REQUIRED_COMPONENTS))
+    st.caption(f"Data loaded from: {GITHUB_DATA_URL}")
+
 
 # Load + validate
 try:
-    df = load_csv_validated(csv_path)
+    # Call load_csv_validated without a path argument as it now uses the constant URL
+    df = load_csv_validated(None) # Pass None or remove argument as it's not used
     agg = aggregate_required(df)
     options = build_options(agg)
     empty = [c for c, lst in options.items() if len(lst) == 0]
     assert not empty, f"No product options available for: {empty}"
-    st.success("CSV loaded and validated ✅")
+    st.success("CSV loaded and validated from GitHub ✅")
 except AssertionError as e:
     st.error(f"Sanity check failed: {e}")
     st.stop()
