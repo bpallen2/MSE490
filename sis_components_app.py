@@ -1,12 +1,39 @@
+# app.py
 from __future__ import annotations
 from typing import List, Dict, Tuple
+import os, hashlib, time
 import pandas as pd
 import numpy as np
 import streamlit as st
-from streamlit_sortables import sort_items
 
 # =========================
-# Streamlit compatibility helpers
+# Build diagnostics (helps confirm you're running the right file)
+# =========================
+def _file_fingerprint(path: str) -> str:
+    try:
+        with open(path, "rb") as f:
+            return hashlib.md5(f.read()).hexdigest()[:8]
+    except Exception:
+        return "unknown"
+THIS_FILE = __file__
+STAMP = time.strftime("%Y-%m-%d %H:%M:%S")
+try:
+    MTIME = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(os.path.getmtime(THIS_FILE)))
+except Exception:
+    MTIME = "unknown"
+FINGERPRINT = _file_fingerprint(THIS_FILE)
+
+with st.sidebar:
+    st.info(
+        f"🧪 **Build Diagnostics**\n\n"
+        f"📄 File: `{THIS_FILE}`\n\n"
+        f"🔑 Hash: `{FINGERPRINT}`\n\n"
+        f"🕒 Modified: {MTIME}\n\n"
+        f"🚀 Run at: {STAMP}"
+    )
+
+# =========================
+# Streamlit helpers
 # =========================
 def _get_cache_decorator():
     return getattr(st, "cache_data", getattr(st, "cache", None))
@@ -16,34 +43,17 @@ if _cache is None:
         def deco(fn): return fn
         return deco
 
-def qp_get(key: str, default=None):
-    qp_obj = getattr(st, "query_params", None)
-    if qp_obj is not None:
-        return qp_obj.get(key, default)
-    old = st.experimental_get_query_params()
-    return (old.get(key, [default]) or [default])[0]
-
-def qp_set(**kwargs):
-    qp_obj = getattr(st, "query_params", None)
-    if qp_obj is not None:
-        qp_obj.update({k: str(v) for k, v in kwargs.items()})
-    else:
-        st.experimental_set_query_params(**{k: str(v) for k, v in kwargs.items()})
-
 def safe_toast(msg: str, icon: str | None = None):
     fn = getattr(st, "toast", None)
-    if fn:
-        fn(msg, icon=icon)
-    else:
-        st.info(f"{icon or ''} {msg}")
+    if fn: fn(msg, icon=icon)
+    else:  st.info(f"{icon or ''} {msg}")
 
 def safe_progress(value: float, text: str | None = None):
-    """Progress bar that works across Streamlit versions."""
     v = max(0.0, min(1.0, float(value)))
     try:
-        return st.progress(v, text=text)   # newer Streamlit (float + text)
+        return st.progress(v, text=text)
     except TypeError:
-        return st.progress(int(v*100))     # older Streamlit (0-100 int, no text)
+        return st.progress(int(v*100))
 
 # =========================
 # Constants
@@ -53,7 +63,7 @@ REQUIRED_COMPONENTS = ["display", "circuit_boards", "casing"]
 GITHUB_DATA_URL = "https://raw.githubusercontent.com/bpallen2/MSE490/main/datasets/mobile_phone_component_cost_test_dataset.csv"
 
 # =========================
-# Core: load/validate/aggregate
+# Data core
 # =========================
 @_cache(show_spinner=False)
 def load_csv_validated(_: str | None) -> pd.DataFrame:
@@ -99,20 +109,15 @@ def assemble_totals(agg: pd.DataFrame, selections: Dict[str, str]) -> Dict[str, 
     }
 
 # =========================
-# Subset sampling & goal generation (guaranteed achievable)
+# Subset & goal
 # =========================
 def sample_component_subset(all_options: Dict[str, List[str]], rng: np.random.Generator, k: int = 5) -> Dict[str, List[str]]:
-    """Pick up to k unique products per component."""
     subset: Dict[str, List[str]] = {}
     for comp, lst in all_options.items():
         unique = list(dict.fromkeys(lst))
         if len(unique) == 0:
             raise AssertionError(f"No options available for {comp}")
-        if len(unique) <= k:
-            subset[comp] = unique
-        else:
-            idxs = rng.choice(len(unique), size=k, replace=False)
-            subset[comp] = [unique[i] for i in idxs]
+        subset[comp] = unique if len(unique) <= k else [unique[i] for i in rng.choice(len(unique), size=k, replace=False)]
     return subset
 
 def sample_goal_from_subset(agg: pd.DataFrame, subset: Dict[str, List[str]], rng: np.random.Generator) -> Tuple[float,float,Dict[str,str]]:
@@ -134,54 +139,52 @@ def closeness(val: float, target: float, tol: float) -> float:
     return float(max(0.0, 1.0 - abs(val - target)/max(tol, 1e-9)))
 
 # =========================
-# PAGE
+# Page layout
 # =========================
-st.set_page_config(page_title="Phone Component Mixer", page_icon="📱", layout="wide")
+st.set_page_config(page_title="In This Economy?!", page_icon="📱", layout="wide")
 
+# Title + caption (always visible)
+st.title("📱 In This Economy?!")
+st.caption("Build a phone by mixing & matching components. Hit cost + carbon targets to win!")
+st.write("---")
+
+# Hero (nice gradient)
 st.markdown("""
 <style>
-.main .block-container { padding-top: 2rem; padding-bottom: 2rem; }
+.main .block-container { padding-top: 1rem; padding-bottom: 2rem; }
 .hero {
-  padding: 1.0rem 1.25rem;
-  border-radius: 14px;
+  padding: 1.0rem 1.25rem; border-radius: 14px;
   background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
-  color: white;
-  box-shadow: 0 10px 24px rgba(0,0,0,0.10);
+  color: white; box-shadow: 0 10px 24px rgba(0,0,0,0.10);
 }
-.hero h1 { margin: 0; font-weight: 750; }
-.hero p { margin: 0.4rem 0 0; }
+.hero h2 { margin: 0; font-weight: 750; }
+.hero p { margin: .4rem 0 0; }
 [data-testid="stMetric"] {
-  border: 1px solid rgba(0,0,0,0.06);
-  border-radius: 12px; padding: 0.75rem; background: rgba(255,255,255,0.75);
+  border: 1px solid rgba(0,0,0,0.06); border-radius: 12px; padding: 0.75rem; background: rgba(255,255,255,0.75);
 }
 footer {visibility: hidden;} #MainMenu {visibility: hidden;}
 </style>
+<div class="hero">
+  <h2>Mix & match displays, circuit boards, and casings to match a target cost & kg CO₂e.</h2>
+  <p>Each goal samples 5 options per component from the dataset.</p>
+</div>
 """, unsafe_allow_html=True)
 
 # =========================
 # Load + validate
 # =========================
-# Clear the cache before loading data
-st.cache_data.clear()
 df = load_csv_validated(None)
 agg = aggregate_required(df)
 all_options = build_all_options(agg)
 
 # =========================
-# Goal controls
+# Sidebar goal controls
 # =========================
 with st.sidebar:
     st.header("🎯 Goal Settings")
-    default_diff = qp_get("difficulty", "Medium")
-    try:
-        default_seed = int(qp_get("seed", 42))
-    except Exception:
-        default_seed = 42
-    difficulty = st.selectbox("Difficulty", ["Easy", "Medium", "Hard"],
-                              index=["Easy","Medium","Hard"].index(default_diff) if default_diff in ["Easy","Medium","Hard"] else 1)
-    seed = st.number_input("Random seed", min_value=0, value=int(default_seed), step=1)
+    difficulty = st.selectbox("Difficulty", ["Easy", "Medium", "Hard"], index=1)
+    seed = st.number_input("Random seed", min_value=0, value=42, step=1)
     gen_btn = st.button("Generate new goal")
-    qp_set(difficulty=difficulty, seed=seed)
 
 def reset_practice_state():
     st.session_state.attempts = 0
@@ -199,7 +202,7 @@ def refresh_subset_and_goal(seed_val: int, difficulty: str):
         "difficulty": difficulty, "seed": int(seed_val),
         "ref_pick": goal_pick
     }
-    # reset DnD & UI state for new subset
+    # reset UI state for new subset
     st.session_state["subset_sig"] = None
     st.session_state["sortables_state"] = None
     st.session_state["dnd_sig"] = None
@@ -215,15 +218,26 @@ subset = st.session_state.options_subset
 goal = st.session_state.goal
 
 # =========================
-# Drag-and-Drop: three trays + three slots (with SVG tray badges)
+# Selection UI: DnD with fallback to dropdowns
 # =========================
-st.subheader("Drag parts from the tray into the phone slots")
+try:
+    from streamlit_sortables import sort_items
+    HAS_SORTABLES = True
+except Exception:
+    HAS_SORTABLES = False
+    sort_items = None
 
-# Build per-category trays
+# Mode banner
+if HAS_SORTABLES:
+    st.success("🧰 Drag-and-drop mode is active (via `streamlit-sortables`).")
+else:
+    st.warning("⚠️ Drag-and-drop unavailable (missing `streamlit-sortables`). Using dropdowns instead.")
+
 EMOJI = {"display": "📱", "circuit_boards": "🔌", "casing": "🧩"}
 def make_label(comp: str, prod: str) -> str:
     return f"{EMOJI[comp]} {prod}"
 
+# Build per-category trays + lookup
 tray_items_by_comp = {c: [] for c in REQUIRED_COMPONENTS}
 lookup = {}
 for comp in REQUIRED_COMPONENTS:
@@ -232,100 +246,117 @@ for comp in REQUIRED_COMPONENTS:
         tray_items_by_comp[comp].append(lbl)
         lookup[lbl] = (comp, opt)
 
-# Reset sortables state if subset changed
-subset_sig = tuple((c, tuple(subset[c])) for c in REQUIRED_COMPONENTS)
-if st.session_state.get("subset_sig") != subset_sig:
-    st.session_state["subset_sig"] = subset_sig
-    st.session_state["sortables_state"] = None
-    st.session_state["dnd_sig"] = None
-    st.session_state["ui_tick"] = 0
-
-# SVGs and badge CSS for tray headers
-SVG_DISPLAY = """<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128' width='22' height='22'>
-  <rect x='20' y='8' width='88' height='112' rx='14' ry='14' fill='#111827'/>
-  <rect x='26' y='20' width='76' height='88' rx='8' ry='8' fill='#3B82F6' stroke='#0EA5E9' stroke-width='2'/>
-</svg>"""
-SVG_BOARD = """<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128' width='22' height='22'>
-  <rect x='8' y='12' width='112' height='104' rx='10' fill='#065F46' stroke='#10B981' stroke-width='3'/>
-  <rect x='30' y='38' width='20' height='16' rx='2' fill='#111827'/>
-</svg>"""
-SVG_CASE = """<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128' width='22' height='22'>
-  <rect x='24' y='8' width='80' height='112' rx='18' ry='18' fill='#F59E0B' stroke='#B45309' stroke-width='3'/>
-</svg>"""
-
-st.markdown("""
-<style>
-.badge {display:inline-flex;align-items:center;gap:.45rem;padding:.35rem .6rem;font-size:.85rem;font-weight:600;
-        color:#111;background:#f3f4f6;border-radius:12px;margin-bottom:.35rem;border:1px solid #e5e7eb;}
-.badge.blue   { background:#e8f2ff; border-color:#cfe3ff; }
-.badge.green  { background:#e6fbf4; border-color:#c6f7e9; }
-.badge.orange { background:#fff4e5; border-color:#ffe1bf; }
-</style>
-""", unsafe_allow_html=True)
-
-hdr = st.columns(3)
-with hdr[0]:
-    st.markdown(f"<div class='badge blue'>{SVG_DISPLAY} Display Tray</div>", unsafe_allow_html=True)
-with hdr[1]:
-    st.markdown(f"<div class='badge green'>{SVG_BOARD} Circuit Board Tray</div>", unsafe_allow_html=True)
-with hdr[2]:
-    st.markdown(f"<div class='badge orange'>{SVG_CASE} Casing Tray</div>", unsafe_allow_html=True)
-
-# Define initial containers: 3 trays + 3 slots
-initial = [
-    {"header": "🧰 Display Tray",       "items": tray_items_by_comp["display"]},
-    {"header": "🧰 Circuit Board Tray", "items": tray_items_by_comp["circuit_boards"]},
-    {"header": "🧰 Casing Tray",        "items": tray_items_by_comp["casing"]},
-    {"header": "📱 Display Slot",       "items": []},
-    {"header": "🔌 Circuit Board Slot", "items": []},
-    {"header": "🧩 Casing Slot",        "items": []},
-]
-
-base_items = st.session_state.get("sortables_state") or initial
-
-# Render multi-container DnD (guard None on first render)
-new_state = sort_items(base_items, multi_containers=True)
-if new_state is None:
-    new_state = base_items
-st.session_state["sortables_state"] = new_state
-
-# Normalize items from sortables (strings or dicts)
-def _label_from_item(x):
-    if isinstance(x, str):
-        return x
-    if isinstance(x, dict):
-        for k in ("label", "text", "content", "value"):
-            if k in x and isinstance(x[k], str):
-                return x[k]
-    return str(x)
-
-by_header = {}
-for container in new_state:
-    header = container.get("header", "")
-    items_norm = [_label_from_item(i) for i in (container.get("items") or [])]
-    by_header[header] = items_norm
-
-# Bump UI tick if layout changed → ensures progress bars redraw
-dnd_sig = tuple((h, tuple(by_header[h])) for h in sorted(by_header.keys()))
-if st.session_state.get("dnd_sig") != dnd_sig:
-    st.session_state["dnd_sig"] = dnd_sig
-    st.session_state["ui_tick"] = st.session_state.get("ui_tick", 0) + 1
-
-# Parse selections: take the first card in each slot
 selections: Dict[str, str] = {}
-for comp, header in [
-    ("display",        "📱 Display Slot"),
-    ("circuit_boards", "🔌 Circuit Board Slot"),
-    ("casing",         "🧩 Casing Slot"),
-]:
-    items_in_slot = by_header.get(header, []) or []
-    if items_in_slot:
-        lbl = items_in_slot[0]
-        if lbl in lookup:
-            _, prod = lookup[lbl]
-            selections[comp] = prod
 
-# Fallback if a slot is empty
+if HAS_SORTABLES:
+    # Reset sortables state if subset changed
+    subset_sig = tuple((c, tuple(subset[c])) for c in REQUIRED_COMPONENTS)
+    if st.session_state.get("subset_sig") != subset_sig:
+        st.session_state["subset_sig"] = subset_sig
+        st.session_state["sortables_state"] = None
+        st.session_state["dnd_sig"] = None
+        st.session_state["ui_tick"] = 0
+
+    # SVG badges (trays + slots)
+    SVG_DISPLAY = """<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128' width='22' height='22'>
+      <rect x='20' y='8' width='88' height='112' rx='14' ry='14' fill='#111827'/>
+      <rect x='26' y='20' width='76' height='88' rx='8' ry='8' fill='#3B82F6' stroke='#0EA5E9' stroke-width='2'/>
+    </svg>"""
+    SVG_BOARD = """<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128' width='22' height='22'>
+      <rect x='8' y='12' width='112' height='104' rx='10' fill='#065F46' stroke='#10B981' stroke-width='3'/>
+      <rect x='30' y='38' width='20' height='16' rx='2' fill='#111827'/>
+    </svg>"""
+    SVG_CASE = """<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128' width='22' height='22'>
+      <rect x='24' y='8' width='80' height='112' rx='18' ry='18' fill='#F59E0B' stroke='#B45309' stroke-width='3'/>
+    </svg>"""
+    st.markdown("""
+    <style>
+    .badge {display:inline-flex;align-items:center;gap:.45rem;padding:.35rem .6rem;font-size:.85rem;font-weight:600;
+            color:#111;background:#f3f4f6;border-radius:12px;margin-bottom:.35rem;border:1px solid #e5e7eb;}
+    .badge.blue   { background:#e8f2ff; border-color:#cfe3ff; }
+    .badge.green  { background:#e6fbf4; border-color:#c6f7e9; }
+    .badge.orange { background:#fff4e5; border-color:#ffe1bf; }
+    </style>
+    """, unsafe_allow_html=True)
+
+    trays = st.columns(3)
+    with trays[0]:
+        st.markdown(f"<div class='badge blue'>{SVG_DISPLAY} Display Tray</div>", unsafe_allow_html=True)
+    with trays[1]:
+        st.markdown(f"<div class='badge green'>{SVG_BOARD} Circuit Board Tray</div>", unsafe_allow_html=True)
+    with trays[2]:
+        st.markdown(f"<div class='badge orange'>{SVG_CASE} Casing Tray</div>", unsafe_allow_html=True)
+
+    slots = st.columns(3)
+    with slots[0]:
+        st.markdown(f"<div class='badge blue'>{SVG_DISPLAY} Display Slot</div>", unsafe_allow_html=True)
+    with slots[1]:
+        st.markdown(f"<div class='badge green'>{SVG_BOARD} Circuit Board Slot</div>", unsafe_allow_html=True)
+    with slots[2]:
+        st.markdown(f"<div class='badge orange'>{SVG_CASE} Casing Slot</div>", unsafe_allow_html=True)
+
+    # Initial containers: 3 trays + 3 slots
+    initial = [
+        {"header": "🧰 Display Tray",       "items": tray_items_by_comp["display"]},
+        {"header": "🧰 Circuit Board Tray", "items": tray_items_by_comp["circuit_boards"]},
+        {"header": "🧰 Casing Tray",        "items": tray_items_by_comp["casing"]},
+        {"header": "📱 Display Slot",       "items": []},
+        {"header": "🔌 Circuit Board Slot", "items": []},
+        {"header": "🧩 Casing Slot",        "items": []},
+    ]
+
+    base_items = st.session_state.get("sortables_state") or initial
+
+    # Render DnD (may return None on first render)
+    from streamlit_sortables import sort_items  # ensure available
+    new_state = sort_items(base_items, multi_containers=True)
+    if new_state is None:
+        new_state = base_items
+    st.session_state["sortables_state"] = new_state
+
+    # Normalize items to strings
+    def _label_from_item(x):
+        if isinstance(x, str): return x
+        if isinstance(x, dict):
+            for k in ("label", "text", "content", "value"):
+                if k in x and isinstance(x[k], str):
+                    return x[k]
+        return str(x)
+
+    by_header = {}
+    for container in new_state:
+        header = container.get("header", "")
+        items_norm = [_label_from_item(i) for i in (container.get("items") or [])]
+        by_header[header] = items_norm
+
+    # Tick for progress bar redraw
+    dnd_sig = tuple((h, tuple(by_header[h])) for h in sorted(by_header.keys()))
+    if st.session_state.get("dnd_sig") != dnd_sig:
+        st.session_state["dnd_sig"] = dnd_sig
+        st.session_state["ui_tick"] = st.session_state.get("ui_tick", 0) + 1
+
+    # Parse selections (first card in each slot)
+    for comp, header in [
+        ("display",        "📱 Display Slot"),
+        ("circuit_boards", "🔌 Circuit Board Slot"),
+        ("casing",         "🧩 Casing Slot"),
+    ]:
+        items_in_slot = by_header.get(header, []) or []
+        if items_in_slot:
+            lbl = items_in_slot[0]
+            if lbl in lookup:
+                _, prod = lookup[lbl]
+                selections[comp] = prod
+
+else:
+    # Dropdown fallback (no DnD)
+    cols = st.columns(3)
+    labels = {"display": "Display", "circuit_boards": "Circuit Board", "casing": "Casing"}
+    for i, comp in enumerate(REQUIRED_COMPONENTS):
+        with cols[i]:
+            selections[comp] = st.selectbox(labels[comp], subset[comp], index=0)
+
+# Ensure all components have a selection
 for comp in REQUIRED_COMPONENTS:
     if comp not in selections and subset[comp]:
         selections[comp] = subset[comp][0]
@@ -346,7 +377,7 @@ with st.expander("What generated this goal? (hidden until 3 fails)"):
         st.caption("Keep trying! The reference combo & subset appear after 3 failed attempts.")
 
 # =========================
-# Live Totals (auto-update on drag)
+# Live Totals (auto-update)
 # =========================
 totals = assemble_totals(agg, selections)
 chosen = totals["chosen"].rename(columns={"Product Name": "product"})
@@ -362,26 +393,26 @@ with colB:
               f"{totals['total_kg_co2e']:.2f}",
               delta=f"{totals['total_kg_co2e'] - goal['carbon']:+.2f}")
 
-# Closeness bars with fresh placeholders (reliable redraw)
+# --- Closeness bars (no key= on st.empty) ---
 cost_close = closeness(totals["total_cost_usd"], goal["cost"], goal["tol_cost"])
 carbon_close = closeness(totals["total_kg_co2e"], goal["carbon"], goal["tol_carbon"])
-tick = st.session_state.get("ui_tick", 0)
 
 c1, c2 = st.columns(2)
 with c1:
     st.caption(f"Cost closeness — {cost_close*100:.1f}%")
-    ph_cost = st.empty()
+    ph_cost = st.empty()               # no key
     try:
         ph_cost.progress(cost_close, text=f"{cost_close*100:.1f}% within tolerance")
     except TypeError:
         ph_cost.progress(int(cost_close*100))
 with c2:
     st.caption(f"Carbon closeness — {carbon_close*100:.1f}%")
-    ph_carbon = st.empty()
+    ph_carbon = st.empty()             # no key
     try:
         ph_carbon.progress(carbon_close, text=f"{carbon_close*100:.1f}% within tolerance")
     except TypeError:
         ph_carbon.progress(int(carbon_close*100))
+
 
 gap_cost = totals["total_cost_usd"] - goal["cost"]
 gap_co2 = totals["total_kg_co2e"] - goal["carbon"]
@@ -391,7 +422,7 @@ st.caption(f"Δ Cost: {gap_cost:+.2f} (±{goal['tol_cost']:.2f})  •  Δ Carbon
 st.dataframe(chosen[["product","component","kg_co2e","cost_usd"]], use_container_width=True)
 
 # =========================
-# Practice Mode (button-based check)
+# Practice Mode
 # =========================
 st.markdown("### Practice Mode")
 colA, colB, colC, colD = st.columns([1,1,1,2])
@@ -403,9 +434,12 @@ with colD:
     safe_progress(min(attempts, 3)/3.0, text=f"Attempts: {attempts}/3")
 
 if reset_btn:
-    reset_practice_state(); safe_toast("Attempts reset.", icon="↩️")
+    st.session_state.attempts = 0
+    st.session_state.revealed = False
+    safe_toast("Attempts reset.", icon="↩️")
 if reveal_btn:
-    st.session_state.revealed = True; safe_toast("Reference combo revealed below.", icon="👀")
+    st.session_state.revealed = True
+    safe_toast("Reference combo revealed below.", icon="👀")
 
 if check_btn:
     ok_cost, ok_carbon = within_goal(totals["total_cost_usd"], totals["total_kg_co2e"],
@@ -415,9 +449,10 @@ if check_btn:
         st.success("✅ You hit the goal! Both cost and carbon are within tolerance.")
         st.balloons()
         safe_toast("Nice shot! 🎉", icon="🎯")
-        reset_practice_state()
+        st.session_state.attempts = 0
+        st.session_state.revealed = False
     else:
-        st.session_state.attempts += 1
+        st.session_state.attempts = int(st.session_state.get("attempts", 0)) + 1
         msgs = []
         if not ok_cost:
             msgs.append(f"Cost off by {gap_cost:+.2f} (±{goal['tol_cost']:.2f})")
@@ -425,7 +460,7 @@ if check_btn:
             msgs.append(f"Carbon off by {gap_co2:+.2f} (±{goal['tol_carbon']:.2f})")
         st.warning("Attempt not within tolerance:\n- " + "\n- ".join(msgs))
         safe_toast("Keep iterating ⚙️", icon="🧭")
-        if st.session_state.attempts >= 3 and not st.session_state.revealed:
+        if st.session_state.attempts >= 3 and not st.session_state.get("revealed", False):
             st.session_state.revealed = True
             st.info("👀 Reference combo revealed below.")
             st.experimental_rerun()
